@@ -17,7 +17,6 @@ from logging.handlers import (
     HTTPHandler,
 )
 
-
 try:
     from six import with_metaclass
 except:
@@ -29,6 +28,18 @@ except:
         return type.__new__(metaclass, 'temporary_class', (), {})
 
 PY2 = sys.version_info[0] == 2
+
+
+class cached_property(object):
+    def __init__(self, func):
+        self.__doc__ = getattr(func, '__doc__')
+        self.func = func
+
+    def __get__(self, obj, cls):
+        if obj is None:
+            return self
+        value = obj.__dict__[self.func.__name__] = self.func(obj)
+        return value
 
 
 class IntField(int):
@@ -97,22 +108,6 @@ class Logger(object):
         self._logger = logger
         self._formatter = formatter
 
-    @classmethod
-    def get_logger(cls, log_type, level=Level.INFO, console_output=False):
-        if not isinstance(level, IntField):
-            raise TypeError("level: {0} not Logger.Level const type".format(type(level)))
-        if level not in cls.Level.FIELD_DICT.values():
-            raise ValueError("level= {0} not support".format(level))
-
-        logger = logging.getLogger(log_type)
-        formatter = logging.Formatter(datefmt=cls._DEFAULT_DATE_FORMAT, fmt=cls._DEFAULT_FORMAT)
-        logger.setLevel(level)
-
-        if console_output is False:
-            logger.propagate = False
-
-        return cls(logger, formatter)
-
     def add_file_handler(self, filename, rotate_mode=RotateMode.DAYS):
         handler = TimedRotatingFileHandler(filename, when=rotate_mode, utc=True)
         handler.setFormatter(self._formatter)
@@ -128,6 +123,53 @@ class Logger(object):
         # should known SysLogHandler params
         self._add_handler(SysLogHandler(*args, **kwargs))
 
+    def add_smtp_handler(self, *args, **kwargs):
+        # should known SMTPHandler params
+        self._add_handler(SMTPHandler(*args, **kwargs))
+
+    def add_http_handler(self, *args, **kwargs):
+        # should known HTTPHandler params
+        self._add_handler(HTTPHandler(*args, **kwargs))
+
     def _add_handler(self, handler):
         handler.setFormatter(self._formatter)
         self._logger.addHandler(handler)
+
+    @cached_property
+    def info(self):
+        return self._logger.info
+
+    @cached_property
+    def warn(self):
+        return self._logger.warning
+
+    @cached_property
+    def error(self):
+        return self._logger.error
+
+    @cached_property
+    def exception(self):
+        return self._logger.exception
+
+    @property
+    def debug(self):
+        return self._logger.debug
+
+    @cached_property
+    def critical(self):
+        return self._logger.critical
+
+    @classmethod
+    def get_logger(
+            cls, log_type, level=Level.INFO, propagate=False, date_fmt=_DEFAULT_DATE_FORMAT, fmt=_DEFAULT_FORMAT
+    ):
+        if not isinstance(level, IntField):
+            raise TypeError("level: {0} not Logger.Level const type".format(type(level)))
+        if level not in cls.Level.FIELD_DICT.values():
+            raise ValueError("level= {0} not support".format(level))
+
+        logger = logging.getLogger(log_type)
+        formatter = logging.Formatter(datefmt=date_fmt, fmt=fmt)
+        logger.setLevel(level)
+        logger.propagate = propagate
+        return cls(logger, formatter)
