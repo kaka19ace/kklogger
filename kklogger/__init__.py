@@ -6,6 +6,7 @@
 # @brief
 #
 
+from .logger import Logger, LogManager
 
 
 
