@@ -11,13 +11,8 @@ import os
 import json
 
 
-class KKLoggerException(Exception):
-    pass
-
-
-
 def read_from_yaml(path):
-    from ..util.yaml import YamlHelper
+    from ..util.yaml_helper import YamlHelper
     return YamlHelper.get_config_data(path)
 
 
@@ -79,14 +74,13 @@ def read_from_etcd(
         client = etcd.Client(**client_kwargs)
         key = content['key']
     else:
-        raise KKLoggerException("not support read_type= {0}".format(read_type))
+        raise ValueError(u"not support read_type= {0}".format(read_type))
 
     result = client.get(key)
     return json.loads(result.value)
 
 
-class Parser(object):
-    @classmethod
-    def parse_config(cls, manager, config_data):
-        registered_logger_dict = manager._REGISTERED_LOGGER_DICT
-        raise NotImplementedError
+def parse_config(manager, config_data):
+    registered_logger_dict = manager._REGISTERED_LOGGER_DICT
+    # TODO: load and register
+    raise NotImplementedError

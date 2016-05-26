@@ -12,3 +12,6 @@ from kklogger import Logger, LogManager
 
 if __name__ == "__main__":
     print(LogManager.ConfigType.YAML)
+
+
+

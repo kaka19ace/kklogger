@@ -30,25 +30,12 @@ except:
         return type.__new__(metaclass, 'temporary_class', (), {})
 
 from .util import (
-    KKLoggerException,
     read_from_yaml,
     read_from_etcd,
-    Parser,
+    parse_config,
 )
 
 PY2 = sys.version_info[0] == 2
-
-
-class cached_property(object):
-    def __init__(self, func):
-        self.__doc__ = getattr(func, '__doc__')
-        self.func = func
-
-    def __get__(self, obj, cls):
-        if obj is None:
-            return self
-        value = obj.__dict__[self.func.__name__] = self.func(obj)
-        return value
 
 
 class IntField(int):
@@ -102,14 +89,6 @@ class Logger(LoggerAdapter):
     # [ 16.6.7. LogRecord attributes -Python docs ](https://docs.python.org/3/library/logging.html#logrecord-attributes)
     DEFAULT_FORMAT = '[%(levelname)s %(process)d:%(asctime)s:%(funcName)s:%(lineno)d] %(message)s'
     DEFAULT_DATE_FORMAT = '%Y%m%d %H:%M:%S'  # display as local zone
-
-    class Level(_Const):
-        CRITICAL = logging.CRITICAL
-        ERROR = logging.ERROR
-        WARN = logging.WARN
-        INFO = logging.INFO
-        DEBUG = logging.DEBUG
-        NOTSET = logging.NOTSET
 
     class RotateMode(_Const):
         """
@@ -177,15 +156,16 @@ class Logger(LoggerAdapter):
 
 
 class LogManager(object):
-    _threading_lock = threading.Lock()
+    _lock = threading.RLock()
     _REGISTERED_LOGGER_DICT = {}
 
     # config options:
-    # 1. yaml
-    # 2. etcd
-    class ConfigType(_Const):
-        YAML = IntField(1, read_handler=read_from_yaml)
-        ETCD = IntField(2, read_handler=read_from_etcd)
+    CONFIG_YAML = 1
+    CONFIG_ETCD = 2
+    CONFIG_READ_HANDLER_DICT = {
+        CONFIG_YAML: read_from_yaml,
+        CONFIG_ETCD: read_from_etcd,
+    }
 
     _META_CONFIG = NotImplemented
 
@@ -196,23 +176,33 @@ class LogManager(object):
         1. tell LogManager way do want to read from
         2. tell the specified config type with parameters that you can correctly read the config data
         :param config_type:
-        :param kwargs: ConfigType.$type.read_handler with read the parameters
+        :param kwargs: config read_handler with read the parameters
         """
-        if config_type not in cls.ConfigType.FIELD_DICT.values():
-            raise KKLoggerException("no support config_type= {0} it should be defined in LogManager.ConfigType".format(config_type))
+        if config_type not in cls.CONFIG_READ_HANDLER_DICT.keys():
+            raise ValueError("no support config_type= {0} it should be defined in LogManager.ConfigType".format(
+                config_type))
 
-        with cls._threading_lock:
-            cls._META_CONFIG = {
-                'type': config_type,
-                'kwargs': kwargs
-            }
+        with cls._lock:
+            cls._META_CONFIG = {'type': config_type, 'kwargs': kwargs}
 
     @classmethod
-    def load_config(cls):
-        with cls._threading_lock:
+    def load(cls):
+        """
+        Recommendation:
+        just load once at the startup of the process/app
+
+        eg:
+        LogManager.register_meta_config(LogManager.ConfigType.YAML, host="127.0.0.1", port=2379)
+        LogManager.load()
+
+        # your app start running
+        app.run()
+        """
+        with cls._lock:
             config_type = cls._META_CONFIG['type']
-            config_data = config_type.read_handler(**cls._META_CONFIG['kwargs'])
-            Parser.parse_config(cls, config_data)
+            read_handler = cls.CONFIG_READ_HANDLER_DICT[config_type]
+            config_data = read_handler(**cls._META_CONFIG['kwargs'])
+            parse_config(cls, config_data)
 
     @staticmethod
     def get_root_logger():
@@ -220,22 +210,17 @@ class LogManager(object):
 
     @staticmethod
     def create_logger(
-            name=None, level=Logger.Level.INFO, propagate=True,
+            name=None, level=logging.INFO, propagate=True,
             date_fmt=Logger.DEFAULT_DATE_FORMAT, fmt=Logger.DEFAULT_FORMAT
     ):
         """
         :param name: default None
-        :param level: default Level.INFO
+        :param level: default logging.INFO
         :param propagate: default True
         :param date_fmt:
         :param fmt:
         :return: Logger instance
         """
-        if not isinstance(level, IntField):
-            raise TypeError("level: {0} not Logger.Level const type".format(type(level)))
-        if level not in Logger.Level.FIELD_DICT.values():
-            raise ValueError("level= {0} not support".format(level))
-
         logger = logging.getLogger(name)
         formatter = logging.Formatter(datefmt=date_fmt, fmt=fmt)
         logger.setLevel(level)
@@ -248,4 +233,7 @@ class LogManager(object):
         if registered_logger:
             return registered_logger
         else:
-            return cls.get_root_logger()
+            root_logger = cls.get_root_logger()
+            root_logger.warning("not found logger by name= {0}".format(name))
+            return root_logger
+
